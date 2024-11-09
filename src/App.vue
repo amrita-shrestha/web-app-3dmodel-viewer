@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, unref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, unref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import {
   AmbientLight,
   AxesHelper,
@@ -51,6 +51,7 @@ import {
   Mesh,
   PerspectiveCamera,
   PointLight,
+  DirectionalLight,
   WebGLRenderer,
   ACESFilmicToneMapping,
   EquirectangularReflectionMapping,
@@ -83,6 +84,7 @@ import { Resource } from '@ownclouders/web-client/src'
 import PreviewControls from './components/PreviewControls.vue'
 import { supportedExtensions, supportedMimeTypes } from './mimeTypes'
 import { id as appId } from '../public/manifest.json'
+import {positionLocal} from "three/examples/jsm/nodes/accessors/PositionNode";
 
 const environment = new URL('./assets/custom_light.jpg', import.meta.url).href
 
@@ -93,6 +95,9 @@ const { getUrlForResource } = useAppFileHandling({ clientService: useClientServi
 const { activeFiles, currentFileContext, loadFolderForFileContext } = useAppDefaults({
   applicationId: appId
 })
+
+// Store a reference to the model for light tracking
+let currentModelObject: Mesh | null = null
 
 // 3d canvas
 let camera: PerspectiveCamera, renderer: WebGLRenderer, controls: OrbitControls
@@ -230,7 +235,7 @@ const materialParams = {
 
 const lightParams = {
   color: 0xffffff,
-  intensity: 1000,
+  intensity: 0.5,
   posX: 2.5,
   posY: 15,
   posZ: 25,
@@ -250,7 +255,7 @@ async function renderModel(extension: string) {
   if (import.meta.env.MODE === 'development') {
     debug(model)
   }
-
+  model.name = "currentM"
   const box = new Box3()
   if (!model.hasOwnProperty('scene') && extension === 'stl') {
     const mesh = new Mesh(model, defaultMaterial())
@@ -270,6 +275,7 @@ async function renderModel(extension: string) {
     mesh.scale.set(0.1, 0.1, 0.1)
     scene.add(mesh)
     box.setFromBufferAttribute(model.attributes.position)
+    currentModelObject = mesh
   }
   else {
     box.setFromObject(model.scene)
@@ -299,13 +305,43 @@ async function renderModel(extension: string) {
 }
 
 function loadLights(): void {
-  const light = new PointLight(lightParams.color, lightParams.intensity)
+  const light = new DirectionalLight(lightParams.color, lightParams.intensity)
   light.position.set(lightParams.posX, lightParams.posY, lightParams.posZ)
+  light.name = 'myLightName'
   scene.add(light)
 
   if (lightParams.ambient) {
     const ambientLight = new AmbientLight()
     scene.add(ambientLight)
+  }
+}
+
+function updateLightPosition() {
+  // Define a small threshold for detecting rotation changes
+  const rotationThreshold = 0.01
+  // Get the rotation of the camera
+  const rotation = camera.rotation;
+  const light = scene.getObjectByName('myLightName')
+
+
+  // Check if any of the rotations have changed significantly
+  if (Math.abs(rotation.x) > rotationThreshold ||
+    Math.abs(rotation.y) > rotationThreshold ||
+    Math.abs(rotation.z) > rotationThreshold) {
+
+    const lightDistance = 100
+    console.log("Rotation detected. Updating light position")
+
+
+    // Calculate the new light position based on the camera's rotation
+    const lightX = lightDistance * Math.sin(rotation.x) // rotating around Y-axis (yaw)
+    const lightY = lightDistance * Math.sin(rotation.y) // rotating around Y-axis (yaw)
+
+    console.log(`Light Position: X=${lightX}, Y=${lightY}`)
+
+    // Update light position based on camera's rotation
+    light.position.set(lightX, lightY,light.position.x)
+    light.lookAt(scene.position)
   }
 }
 
@@ -315,6 +351,7 @@ function defaultMaterial(): MeshPhongMaterial {
 
 function render(animStartTime: number) {
   animationId.value = requestAnimationFrame(() => render(animStartTime))
+  updateLightPosition()
   // TODO: enable animation
   // const elapsedTime = (Date.now() - animStartTime) / 1000
   // if (elapsedTime < animTimeoutSec) {
