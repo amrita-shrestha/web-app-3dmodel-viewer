@@ -43,14 +43,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, unref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, unref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import {
   AmbientLight,
   AxesHelper,
   Scene,
   Mesh,
   PerspectiveCamera,
-  PointLight,
+  DirectionalLight,
   WebGLRenderer,
   ACESFilmicToneMapping,
   EquirectangularReflectionMapping,
@@ -65,6 +65,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader'
+import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import {
   AppLoadingSpinner,
@@ -216,7 +217,8 @@ const LoaderMap = {
   glb: GLTFLoader,
   stl: STLLoader,
   fbx: FBXLoader,
-  obj: OBJLoader
+  obj: OBJLoader,
+  ply: PLYLoader
 }
 
 const materialParams = {
@@ -228,7 +230,7 @@ const materialParams = {
 
 const lightParams = {
   color: 0xffffff,
-  intensity: 1000,
+  intensity: 0.5,
   posX: 2.5,
   posY: 15,
   posZ: 25,
@@ -248,10 +250,10 @@ async function renderModel(extension: string) {
   if (import.meta.env.MODE === 'development') {
     debug(model)
   }
-
   const box = new Box3()
   if (!model.hasOwnProperty('scene') && extension === 'stl') {
     const mesh = new Mesh(model, defaultMaterial())
+
     scene.add(mesh)
     box.setFromBufferAttribute(model.attributes.position)
   } else if (!model.hasOwnProperty('scene') && (extension === 'fbx' || extension === 'obj')) {
@@ -262,7 +264,13 @@ async function renderModel(extension: string) {
       }
     })
     scene.add(model)
-  } else {
+  } else if (extension === 'ply'){
+    const mesh = new Mesh(model, model.material ? model.material : defaultMaterial())
+    mesh.scale.set(0.1, 0.1, 0.1)
+    scene.add(mesh)
+    box.setFromBufferAttribute(model.attributes.position)
+  }
+  else {
     box.setFromObject(model.scene)
   }
 
@@ -270,9 +278,25 @@ async function renderModel(extension: string) {
 
   // direct camera at model
   camera.position.copy(iniCamPosition)
-  iniCamZPosition = box.getSize(new Vector3()).length() + 1
-  camera.position.z = iniCamZPosition
-  camera.lookAt(iniCamPosition)
+  const size = box.getSize(new Vector3()).length()
+  const center = box.getCenter(new THREE.Vector3())
+
+  model.position.x += (model.position.x - center.x);
+  model.position.y += (model.position.y - center.y);
+  model.position.z += (model.position.z - center.z);
+
+  camera.near = size / 100
+  camera.far = size * 100
+  camera.updateProjectionMatrix()
+
+  camera.position.copy(center);
+  camera.position.x += size / 2.0
+  camera.position.y += size / 5.0
+  camera.position.z += size / 2.0
+  camera.lookAt(center)
+
+  controls.maxDistance = size * 10
+  controls.update()
 
   loadingModel.value = false
   if (extension === 'glb') {
@@ -290,8 +314,9 @@ async function renderModel(extension: string) {
 }
 
 function loadLights(): void {
-  const light = new PointLight(lightParams.color, lightParams.intensity)
+  const light = new DirectionalLight(lightParams.color, lightParams.intensity)
   light.position.set(lightParams.posX, lightParams.posY, lightParams.posZ)
+  light.name = 'myLightName'
   scene.add(light)
 
   if (lightParams.ambient) {
@@ -300,12 +325,45 @@ function loadLights(): void {
   }
 }
 
+function updateLightPosition() {
+  // Define a small threshold for detecting rotation changes
+  const rotationThreshold = 0.01
+  // Get the rotation of the camera
+  const rotation = camera.rotation;
+
+
+  window.addEventListener('mousemove', (event)=>{
+
+    console.log("vent.clientX")
+    const mouseX = (event.clientX / window.innerWidth) * 2
+    console.log(mouseX)
+    const mouseY = -(event.clientY / window.innerHeight) * 2
+    const light = scene.getObjectByName('myLightName')
+    // Check if any of the rotations have changed significantly
+    if (Math.abs(rotation.x) > rotationThreshold ||
+      Math.abs(rotation.y) > rotationThreshold ||
+      Math.abs(rotation.z) > rotationThreshold) {
+
+      // Calculate the new light position based on the camera's rotation
+      const lightX = mouseX // rotating around Y-axis (yaw)
+      const lightY = mouseY // rotating around Y-axis (yaw)
+
+      console.log(`Light Position: X=${lightX}, Y=${lightY}`)
+
+      // Update light position based on camera's rotation
+      light.position.set(lightX, lightY,25)
+    }
+  }, false)
+
+}
+
 function defaultMaterial(): MeshPhongMaterial {
   return new MeshPhongMaterial(materialParams)
 }
 
 function render(animStartTime: number) {
   animationId.value = requestAnimationFrame(() => render(animStartTime))
+  updateLightPosition()
   // TODO: enable animation
   // const elapsedTime = (Date.now() - animStartTime) / 1000
   // if (elapsedTime < animTimeoutSec) {
