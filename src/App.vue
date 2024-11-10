@@ -50,7 +50,6 @@ import {
   Scene,
   Mesh,
   PerspectiveCamera,
-  PointLight,
   DirectionalLight,
   WebGLRenderer,
   ACESFilmicToneMapping,
@@ -84,7 +83,6 @@ import { Resource } from '@ownclouders/web-client/src'
 import PreviewControls from './components/PreviewControls.vue'
 import { supportedExtensions, supportedMimeTypes } from './mimeTypes'
 import { id as appId } from '../public/manifest.json'
-import {positionLocal} from "three/examples/jsm/nodes/accessors/PositionNode";
 
 const environment = new URL('./assets/custom_light.jpg', import.meta.url).href
 
@@ -95,9 +93,6 @@ const { getUrlForResource } = useAppFileHandling({ clientService: useClientServi
 const { activeFiles, currentFileContext, loadFolderForFileContext } = useAppDefaults({
   applicationId: appId
 })
-
-// Store a reference to the model for light tracking
-let currentModelObject: Mesh | null = null
 
 // 3d canvas
 let camera: PerspectiveCamera, renderer: WebGLRenderer, controls: OrbitControls
@@ -255,7 +250,6 @@ async function renderModel(extension: string) {
   if (import.meta.env.MODE === 'development') {
     debug(model)
   }
-  model.name = "currentM"
   const box = new Box3()
   if (!model.hasOwnProperty('scene') && extension === 'stl') {
     const mesh = new Mesh(model, defaultMaterial())
@@ -275,7 +269,6 @@ async function renderModel(extension: string) {
     mesh.scale.set(0.1, 0.1, 0.1)
     scene.add(mesh)
     box.setFromBufferAttribute(model.attributes.position)
-    currentModelObject = mesh
   }
   else {
     box.setFromObject(model.scene)
@@ -285,9 +278,25 @@ async function renderModel(extension: string) {
 
   // direct camera at model
   camera.position.copy(iniCamPosition)
-  iniCamZPosition = box.getSize(new Vector3()).length() + 1
-  camera.position.z = iniCamZPosition
-  camera.lookAt(iniCamPosition)
+  const size = box.getSize(new Vector3()).length()
+  const center = box.getCenter(new THREE.Vector3())
+
+  model.position.x += (model.position.x - center.x);
+  model.position.y += (model.position.y - center.y);
+  model.position.z += (model.position.z - center.z);
+
+  camera.near = size / 100
+  camera.far = size * 100
+  camera.updateProjectionMatrix()
+
+  camera.position.copy(center);
+  camera.position.x += size / 2.0
+  camera.position.y += size / 5.0
+  camera.position.z += size / 2.0
+  camera.lookAt(center)
+
+  controls.maxDistance = size * 10
+  controls.update()
 
   loadingModel.value = false
   if (extension === 'glb') {
@@ -321,28 +330,31 @@ function updateLightPosition() {
   const rotationThreshold = 0.01
   // Get the rotation of the camera
   const rotation = camera.rotation;
-  const light = scene.getObjectByName('myLightName')
 
 
-  // Check if any of the rotations have changed significantly
-  if (Math.abs(rotation.x) > rotationThreshold ||
-    Math.abs(rotation.y) > rotationThreshold ||
-    Math.abs(rotation.z) > rotationThreshold) {
+  window.addEventListener('mousemove', (event)=>{
 
-    const lightDistance = 100
-    console.log("Rotation detected. Updating light position")
+    console.log("vent.clientX")
+    const mouseX = (event.clientX / window.innerWidth) * 2
+    console.log(mouseX)
+    const mouseY = -(event.clientY / window.innerHeight) * 2
+    const light = scene.getObjectByName('myLightName')
+    // Check if any of the rotations have changed significantly
+    if (Math.abs(rotation.x) > rotationThreshold ||
+      Math.abs(rotation.y) > rotationThreshold ||
+      Math.abs(rotation.z) > rotationThreshold) {
 
+      // Calculate the new light position based on the camera's rotation
+      const lightX = mouseX // rotating around Y-axis (yaw)
+      const lightY = mouseY // rotating around Y-axis (yaw)
 
-    // Calculate the new light position based on the camera's rotation
-    const lightX = lightDistance * Math.sin(rotation.x) // rotating around Y-axis (yaw)
-    const lightY = lightDistance * Math.sin(rotation.y) // rotating around Y-axis (yaw)
+      console.log(`Light Position: X=${lightX}, Y=${lightY}`)
 
-    console.log(`Light Position: X=${lightX}, Y=${lightY}`)
+      // Update light position based on camera's rotation
+      light.position.set(lightX, lightY,25)
+    }
+  }, false)
 
-    // Update light position based on camera's rotation
-    light.position.set(lightX, lightY,light.position.x)
-    light.lookAt(scene.position)
-  }
 }
 
 function defaultMaterial(): MeshPhongMaterial {
